@@ -21,15 +21,25 @@ logger = logging.getLogger(__name__)
 class IoTPreprocessor:
     """Preprocessor for IoT intrusion detection data."""
     
-    def __init__(self, config_path: str = "config.yaml"):
+    def __init__(self, config_input = None):
         """
         Initialize preprocessor with configuration.
         
         Args:
-            config_path: Path to configuration YAML file
+            config_input: Either a path to configuration YAML file (str) or a config dictionary
         """
-        with open(config_path, 'r') as f:
-            self.config = yaml.safe_load(f)
+        if config_input is None:
+            config_input = "config.yaml"
+            
+        if isinstance(config_input, str):
+            # If it's a string, treat it as a file path
+            with open(config_input, 'r') as f:
+                self.config = yaml.safe_load(f)
+        elif isinstance(config_input, dict):
+            # If it's already a dictionary, use it directly
+            self.config = config_input
+        else:
+            raise TypeError("config_input must be either a file path (str) or a config dictionary (dict)")
         
         self.scaler = None
         self.label_encoder = None
@@ -377,10 +387,20 @@ class IoTPreprocessor:
             'val_samples': len(X_val_seq),
             'test_samples': len(X_test_seq),
             'sequence_length': self.config['sequences']['sequence_length'],
+            'stride': self.config['sequences']['stride'],
             'num_features': X.shape[1],
             'num_classes': len(self.class_names),
             'class_names': list(self.class_names),
-            'class_weights': self.class_weights
+            'class_weights': self.class_weights,
+            'class_weights_computed': True,
+            'scaling_method': self.config['preprocessing']['scaling_method'],
+            'feature_names': [f'feature_{i}' for i in range(X.shape[1])],  # Generic feature names
+            'X_train': X_train,  # Original scaled features before sequencing
+            'X_train_scaled': X_train,  # Same as above for backward compatibility
+            'y_train': y_train_seq,  # Labels for training sequences
+            'X_train_seq': X_train_seq,  # Training sequences
+            'X_val_seq': X_val_seq,  # Validation sequences  
+            'X_test_seq': X_test_seq,  # Test sequences
         }
         
         logger.info("Preprocessing pipeline completed successfully")
