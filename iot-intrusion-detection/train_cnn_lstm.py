@@ -17,6 +17,7 @@ from data_loader import IoTDataLoader
 from preprocessor import IoTPreprocessor
 from cnn_lstm_model import CnnLstmModel
 from train import IoTModelTrainer
+from src import resolve_config_path
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -27,20 +28,25 @@ def main():
     logger.info("Starting CNN-LSTM model training")
     
     try:
-        # Step 1: Load raw data
-        logger.info("Step 1: Loading raw data")
-        data_loader = IoTDataLoader("data/raw")
-        data = data_loader.load_data()
-        
-        # Get dataset info
-        info = data_loader.get_data_info()
-        logger.info(f"Dataset loaded: {info['total_records']:,} records, {info['total_features']} samples")
-        
-        # Step 2: Preprocess data
-        logger.info("Step 2: Preprocessing data")
-        preprocessor = IoTPreprocessor()
-        metadata = preprocessor.process_full_pipeline(data, "data/processed")
-        logger.info(f"Preprocessing completed: {metadata}")
+        # Step 1 & 2: Load + Preprocess raw data (skipped if processed files exist or SKIP_PREPROCESS=1)
+        processed_dir = Path("data/processed")
+        processed_exists = all((processed_dir / f).exists() for f in [
+            "X_train.npy", "X_val.npy", "y_train.npy", "y_val.npy"
+        ])
+        skip_pre = os.environ.get("SKIP_PREPROCESS", "0") == "1"
+        if processed_exists or skip_pre:
+            logger.info("Skipping raw data load and preprocessing (using existing processed data)")
+        else:
+            logger.info("Step 1: Loading raw data")
+            data_loader = IoTDataLoader("data/raw")
+            data = data_loader.load_data()
+            info = data_loader.get_data_info()
+            logger.info(f"Dataset loaded: {info['total_records']:,} records, {info['total_features']} samples")
+            
+            logger.info("Step 2: Preprocessing data")
+            preprocessor = IoTPreprocessor(resolve_config_path())
+            metadata = preprocessor.process_full_pipeline(data, "data/processed")
+            logger.info("Preprocessing completed")
         
         # Step 3: Load processed data
         logger.info("Step 3: Loading processed data")
@@ -48,6 +54,18 @@ def main():
         X_val = np.load("data/processed/X_val.npy")
         y_train = np.load("data/processed/y_train.npy")
         y_val = np.load("data/processed/y_val.npy")
+
+        # Optional: subsample to fit memory constraints
+        train_limit = int(os.environ.get("TRAIN_LIMIT", "500000"))
+        val_limit = int(os.environ.get("VAL_LIMIT", "100000"))
+        if X_train.shape[0] > train_limit:
+            logger.info(f"Subsampling training set from {X_train.shape[0]:,} to {train_limit:,}")
+            X_train = X_train[:train_limit]
+            y_train = y_train[:train_limit]
+        if X_val.shape[0] > val_limit:
+            logger.info(f"Subsampling validation set from {X_val.shape[0]:,} to {val_limit:,}")
+            X_val = X_val[:val_limit]
+            y_val = y_val[:val_limit]
         
         logger.info(f"Processed data loaded:")
         logger.info(f"  Train: {X_train.shape} -> {y_train.shape}")
@@ -67,7 +85,15 @@ def main():
         
         # Step 5: Train model
         logger.info("Step 5: Training CNN-LSTM model")
-        trainer = IoTModelTrainer()
+        trainer = IoTModelTrainer(resolve_config_path())
+        # Optionally lower batch size to reduce memory usage
+        try:
+            desired_bs = int(os.environ.get("BATCH_SIZE", "64"))
+            if desired_bs < trainer.training_config['batch_size']:
+                logger.info(f"Reducing batch size from {trainer.training_config['batch_size']} to {desired_bs}")
+                trainer.training_config['batch_size'] = desired_bs
+        except Exception:
+            pass
         results = trainer.train_cnn_lstm(X_train, y_train, X_val, y_val)
         
         # Step 6: Print results
@@ -83,7 +109,7 @@ def main():
         
         # Save model summary
         model_summary = model_builder.get_model_summary()
-        with open("results/reports/cnn_lstm_model_summary.txt", "w") as f:
+        with open("results/reports/cnn_lstm_model_summary.txt", "w", encoding="utf-8") as f:
             f.write("CNN-LSTM Model Summary\n")
             f.write("="*30 + "\n\n")
             f.write(model_summary)

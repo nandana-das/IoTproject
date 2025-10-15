@@ -173,15 +173,27 @@ class IoTModelTrainer:
         # Create output directory if it doesn't exist
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
         
-        # Prepare data for JSON serialization
-        json_results = results.copy()
-        # Convert numpy arrays to lists for JSON serialization
-        if 'history' in json_results:
-            for key, value in json_results['history'].items():
-                if isinstance(value, np.ndarray):
-                    json_results['history'][key] = value.tolist()
-                elif isinstance(value, list) and len(value) > 0 and isinstance(value[0], np.ndarray):
-                    json_results['history'][key] = [v.tolist() for v in value]
+        # Prepare data for JSON serialization by converting numpy types recursively
+        def to_serializable(obj: Any):
+            # Scalars
+            if isinstance(obj, (np.integer,)):
+                return int(obj)
+            if isinstance(obj, (np.floating,)):
+                return float(obj)
+            if isinstance(obj, (np.bool_,)):
+                return bool(obj)
+            # Arrays
+            if isinstance(obj, np.ndarray):
+                return obj.tolist()
+            # Lists/Tuples
+            if isinstance(obj, (list, tuple)):
+                return [to_serializable(v) for v in obj]
+            # Dicts
+            if isinstance(obj, dict):
+                return {k: to_serializable(v) for k, v in obj.items()}
+            return obj
+
+        json_results = to_serializable(results)
         
         # Save to JSON
         with open(output_path, 'w') as f:
@@ -335,12 +347,34 @@ def train_both_models(data_path: str = "data/processed") -> Tuple[Dict[str, Any]
     X_val = np.load(os.path.join(data_path, 'X_val.npy'))
     y_train = np.load(os.path.join(data_path, 'y_train.npy'))
     y_val = np.load(os.path.join(data_path, 'y_val.npy'))
+
+    # Optional subsampling via env vars for memory-constrained training
+    import os as _os
+    train_limit = int(_os.environ.get("TRAIN_LIMIT", "0"))
+    val_limit = int(_os.environ.get("VAL_LIMIT", "0"))
+    if train_limit and X_train.shape[0] > train_limit:
+        logger.info(f"Subsampling training set from {X_train.shape[0]:,} to {train_limit:,}")
+        X_train = X_train[:train_limit]
+        y_train = y_train[:train_limit]
+    if val_limit and X_val.shape[0] > val_limit:
+        logger.info(f"Subsampling validation set from {X_val.shape[0]:,} to {val_limit:,}")
+        X_val = X_val[:val_limit]
+        y_val = y_val[:val_limit]
     
     logger.info(f"Loaded data - Train: {X_train.shape}, Val: {X_val.shape}")
     
     # Initialize trainer
     trainer = IoTModelTrainer()
     
+    # Optionally reduce batch size via env var
+    try:
+        desired_bs = int(_os.environ.get("BATCH_SIZE", "0"))
+        if desired_bs and desired_bs < trainer.training_config['batch_size']:
+            logger.info(f"Reducing batch size from {trainer.training_config['batch_size']} to {desired_bs}")
+            trainer.training_config['batch_size'] = desired_bs
+    except Exception:
+        pass
+
     # Train both models
     logger.info("Training LSTM-CNN model")
     lstm_cnn_results = trainer.train_lstm_cnn(X_train, y_train, X_val, y_val)

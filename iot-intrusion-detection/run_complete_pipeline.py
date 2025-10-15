@@ -14,6 +14,7 @@ sys.path.append(str(Path(__file__).parent / "src"))
 
 from data_loader import IoTDataLoader
 from preprocessor import IoTPreprocessor
+from src import resolve_config_path
 from train import train_both_models
 from evaluate import IoTEvaluator
 from compare_models import ModelComparator
@@ -29,18 +30,28 @@ def run_complete_pipeline():
     logger.info("=" * 60)
     
     try:
-        # Step 1: Data Loading
-        logger.info("Step 1: Loading BoT-IoT Dataset")
-        data_loader = IoTDataLoader("data/raw")
-        data = data_loader.load_data()
-        info = data_loader.get_data_info()
-        logger.info(f"Dataset loaded: {info['total_records']:,} records")
-        
-        # Step 2: Data Preprocessing
-        logger.info("Step 2: Preprocessing Data")
-        preprocessor = IoTPreprocessor()
-        metadata = preprocessor.process_full_pipeline(data, "data/processed")
-        logger.info(f"Preprocessing completed: {metadata['train_samples']:,} training sequences")
+        # Step 1 & 2: Load + Preprocess (skip if processed exists or SKIP_PREPROCESS=1)
+        processed_dir = Path("data/processed")
+        processed_exists = processed_dir.exists() and all(
+            (processed_dir / f).exists() for f in [
+                'X_train.npy', 'X_val.npy', 'y_train.npy', 'y_val.npy'
+            ]
+        )
+        skip_pre = os.environ.get('SKIP_PREPROCESS', '0') == '1'
+
+        if processed_exists or skip_pre:
+            logger.info("Skipping raw data load and preprocessing (using existing processed data)")
+        else:
+            logger.info("Step 1: Loading BoT-IoT Dataset")
+            data_loader = IoTDataLoader("data/raw")
+            data = data_loader.load_data()
+            info = data_loader.get_data_info()
+            logger.info(f"Dataset loaded: {info['total_records']:,} records")
+            
+            logger.info("Step 2: Preprocessing Data")
+            preprocessor = IoTPreprocessor(resolve_config_path())
+            metadata = preprocessor.process_full_pipeline(data, "data/processed")
+            logger.info("Preprocessing completed")
         
         # Step 3: Model Training
         logger.info("Step 3: Training Both Models")
@@ -123,9 +134,8 @@ def main():
         print("Please download and place the dataset files")
         return
     
-    print(f"Found {len(csv_files)} CSV files in data/raw/")
-    print("Starting complete pipeline...")
-    print()
+    print(f"Found {len(csv_files)} CSV file(s) in data/raw/")
+    print("Starting complete pipeline...\n")
     
     run_complete_pipeline()
 

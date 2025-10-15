@@ -1,0 +1,100 @@
+# Copy of top-level config.yaml to support organized configs directory
+# Keep both in sync or prefer this one via resolver logic in src/utils/config.py
+
+# Dataset Configuration
+data:
+  raw_path: "data/raw/"
+  processed_path: "data/processed/"
+  file_pattern: "UNSW_2018_IoT_Botnet_Final_10_Best.csv"
+  num_features: 10
+  num_classes: 5
+
+# Sequence Configuration
+sequences:
+  sequence_length: 15        # Time steps for LSTM
+  stride: 1                  # Sliding window stride
+  
+# Preprocessing
+preprocessing:
+  test_size: 0.15
+  val_size: 0.15
+  random_state: 42
+  scaling_method: "standard"  # StandardScaler
+  handle_imbalance: false     # Set true if classes imbalanced
+
+# LSTM-CNN Model (Base Paper)
+lstm_cnn:
+  name: "LSTM-CNN"
+  lstm_units_1: 64
+  lstm_units_2: 64
+  lstm_dropout: 0.3
+  return_sequences: true      # For LSTM layers
+  conv_filters_1: 64
+  conv_filters_2: 128
+  kernel_size: 3
+  pool_size: 2
+  dense_units: 32
+  dense_dropout: 0.3
+  output_activation: "softmax"
+
+# CNN-LSTM Model (Comparison)
+cnn_lstm:
+  name: "CNN-LSTM"
+  conv_filters_1: 64
+  conv_filters_2: 128
+  kernel_size: 3
+  pool_size: 2
+  conv_dropout: 0.3
+  lstm_units: 64
+  lstm_dropout: 0.3
+  return_sequences: false
+  dense_units: 32
+  dense_dropout: 0.3
+  output_activation: "softmax"
+
+# Training Configuration
+training:
+  batch_size: 128
+  epochs: 20
+  learning_rate: 0.001
+  optimizer: "adam"
+  loss: "categorical_crossentropy"
+  metrics: ["accuracy"]
+  verbose: 1
+  
+# Callbacks
+callbacks:
+  early_stopping:
+    monitor: "val_loss"
+    patience: 10
+    restore_best_weights: true
+  model_checkpoint:
+    monitor: "val_loss"
+    save_best_only: true
+  reduce_lr:
+    monitor: "val_loss"
+    factor: 0.5
+    patience: 5
+    min_lr: 0.00001
+    
+# Evaluation
+evaluation:
+  metrics:
+    - "accuracy"
+    - "precision"
+    - "recall"
+    - "f1_score"
+    - "auc_roc"
+  per_class_metrics: true
+  confusion_matrix: true
+  roc_curves: true
+  
+# Paths
+paths:
+  models: "models/"
+  results: "results/"
+  plots: "results/plots/"
+  metrics: "results/metrics/"
+  reports: "results/reports/"
+
+
