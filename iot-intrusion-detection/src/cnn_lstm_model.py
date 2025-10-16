@@ -3,155 +3,135 @@ CNN-LSTM model architecture for IoT intrusion detection.
 Comparison architecture with CNN layers followed by LSTM layers.
 """
 
-import tensorflow as tf
-from tensorflow import keras
-from tensorflow.keras import layers
+import torch
+import torch.nn as nn
 import numpy as np
 import yaml
 import logging
+import os
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-class CnnLstmModel:
+class CnnLstmModel(nn.Module):
     """CNN-LSTM model for IoT intrusion detection."""
     
-    def __init__(self, config_path: str = "config.yaml"):
+    def __init__(self, input_shape: tuple, num_classes: int, config_path: str = "config.yaml"):
         """
         Initialize CNN-LSTM model.
         
         Args:
+            input_shape: Shape of input data (sequence_length, num_features)
+            num_classes: Number of output classes
             config_path: Path to configuration file
         """
+        super(CnnLstmModel, self).__init__()
+        
         with open(config_path, 'r') as f:
             self.config = yaml.safe_load(f)
         
-        self.model = None
         self.model_config = self.config['cnn_lstm']
-    
-    def build_model(self, input_shape: tuple, num_classes: int) -> keras.Model:
-        """
-        Build CNN-LSTM model architecture.
+        self.input_shape = input_shape
+        self.num_classes = num_classes
         
-        Args:
-            input_shape: Shape of input data (sequence_length, num_features)
-            num_classes: Number of output classes
-            
-        Returns:
-            Compiled Keras model
-        """
-        logger.info(f"Building CNN-LSTM model with input shape: {input_shape}")
-        
-        # Input layer
-        inputs = layers.Input(shape=input_shape, name='input')
+        # Extract dimensions
+        sequence_length, num_features = input_shape
         
         # CNN layers
-        # First Conv1D layer
-        conv1 = layers.Conv1D(
-            filters=self.model_config['conv_filters_1'],
+        self.conv1 = nn.Conv1d(
+            in_channels=num_features,
+            out_channels=self.model_config['conv_filters_1'],
             kernel_size=self.model_config['kernel_size'],
-            activation='relu',
-            padding='same',
-            name='conv1d_1'
-        )(inputs)
+            padding='same'
+        )
+        self.bn1 = nn.BatchNorm1d(self.model_config['conv_filters_1'])
+        self.pool1 = nn.MaxPool1d(kernel_size=self.model_config['pool_size'])
+        self.dropout1 = nn.Dropout(self.model_config['conv_dropout'])
         
-        # Batch normalization after first conv
-        conv1_bn = layers.BatchNormalization(name='conv1d_1_bn')(conv1)
-        
-        # Max pooling after first conv
-        pool1 = layers.MaxPooling1D(
-            pool_size=self.model_config['pool_size'],
-            name='maxpool_1'
-        )(conv1_bn)
-        
-        # Dropout after first pooling
-        pool1_dropout = layers.Dropout(
-            rate=self.model_config['conv_dropout'],
-            name='pool_1_dropout'
-        )(pool1)
-        
-        # Second Conv1D layer
-        conv2 = layers.Conv1D(
-            filters=self.model_config['conv_filters_2'],
+        self.conv2 = nn.Conv1d(
+            in_channels=self.model_config['conv_filters_1'],
+            out_channels=self.model_config['conv_filters_2'],
             kernel_size=self.model_config['kernel_size'],
-            activation='relu',
-            padding='same',
-            name='conv1d_2'
-        )(pool1_dropout)
+            padding='same'
+        )
+        self.bn2 = nn.BatchNorm1d(self.model_config['conv_filters_2'])
+        self.pool2 = nn.MaxPool1d(kernel_size=self.model_config['pool_size'])
+        self.dropout2 = nn.Dropout(self.model_config['conv_dropout'])
         
-        # Batch normalization after second conv
-        conv2_bn = layers.BatchNormalization(name='conv1d_2_bn')(conv2)
-        
-        # Max pooling after second conv
-        pool2 = layers.MaxPooling1D(
-            pool_size=self.model_config['pool_size'],
-            name='maxpool_2'
-        )(conv2_bn)
-        
-        # Dropout after second pooling
-        pool2_dropout = layers.Dropout(
-            rate=self.model_config['conv_dropout'],
-            name='pool_2_dropout'
-        )(pool2)
+        # Calculate LSTM input size after pooling
+        pooled_length = sequence_length // (self.model_config['pool_size'] ** 2)
         
         # LSTM layer
-        lstm = layers.LSTM(
-            units=self.model_config['lstm_units'],
-            return_sequences=self.model_config['return_sequences'],
-            dropout=self.model_config['lstm_dropout'],
-            name='lstm'
-        )(pool2_dropout)
-        
-        # Dropout after LSTM
-        lstm_dropout = layers.Dropout(
-            rate=self.model_config['lstm_dropout'],
-            name='lstm_dropout'
-        )(lstm)
+        self.lstm = nn.LSTM(
+            input_size=self.model_config['conv_filters_2'],
+            hidden_size=self.model_config['lstm_units'],
+            batch_first=True,
+            dropout=self.model_config['lstm_dropout'] if self.model_config['lstm_dropout'] > 0 else 0
+        )
+        self.lstm_dropout = nn.Dropout(self.model_config['lstm_dropout'])
         
         # Dense layers
-        dense = layers.Dense(
-            units=self.model_config['dense_units'],
-            activation='relu',
-            name='dense'
-        )(lstm_dropout)
-        
-        # Dropout after dense layer
-        dense_dropout = layers.Dropout(
-            rate=self.model_config['dense_dropout'],
-            name='dense_dropout'
-        )(dense)
+        self.dense = nn.Linear(self.model_config['lstm_units'], self.model_config['dense_units'])
+        self.dense_dropout = nn.Dropout(self.model_config['dense_dropout'])
         
         # Output layer
-        outputs = layers.Dense(
-            units=num_classes,
-            activation=self.model_config['output_activation'],
-            name='output'
-        )(dense_dropout)
+        self.output = nn.Linear(self.model_config['dense_units'], num_classes)
         
-        # Create model
-        self.model = keras.Model(inputs=inputs, outputs=outputs, name=self.model_config['name'])
-        
-        # Compile model
-        self._compile_model()
-        
-        return self.model
+        self.relu = nn.ReLU()
+        self.softmax = nn.Softmax(dim=1)
     
-    def _compile_model(self):
-        """Compile the model with optimizer, loss, and metrics."""
-        logger.info("Compiling CNN-LSTM model")
+    def forward(self, x):
+        """
+        Forward pass of the model.
         
-        optimizer = keras.optimizers.Adam(
-            learning_rate=self.config['training']['learning_rate']
-        )
+        Args:
+            x: Input tensor of shape (batch_size, sequence_length, num_features)
+            
+        Returns:
+            Output tensor of shape (batch_size, num_classes)
+        """
+        # Input shape: (batch_size, sequence_length, num_features)
+        # Conv1D expects: (batch_size, channels, sequence_length)
+        x = x.permute(0, 2, 1)
         
-        self.model.compile(
-            optimizer=optimizer,
-            loss=self.config['training']['loss'],
-            metrics=self.config['training']['metrics']
-        )
+        # First CNN block
+        x = self.conv1(x)
+        x = self.bn1(x)
+        x = self.relu(x)
+        x = self.pool1(x)
+        x = self.dropout1(x)
         
-        logger.info("Model compiled successfully")
+        # Second CNN block
+        x = self.conv2(x)
+        x = self.bn2(x)
+        x = self.relu(x)
+        x = self.pool2(x)
+        x = self.dropout2(x)
+        
+        # LSTM expects: (batch_size, sequence_length, input_size)
+        x = x.permute(0, 2, 1)
+        
+        # LSTM layer
+        if self.model_config['return_sequences']:
+            x, _ = self.lstm(x)
+            # Take the last time step
+            x = x[:, -1, :]
+        else:
+            _, (x, _) = self.lstm(x)
+            x = x.squeeze(0)
+        
+        x = self.lstm_dropout(x)
+        
+        # Dense layers
+        x = self.dense(x)
+        x = self.relu(x)
+        x = self.dense_dropout(x)
+        
+        # Output layer
+        x = self.output(x)
+        
+        return x
     
     def get_model_summary(self) -> str:
         """
@@ -160,16 +140,14 @@ class CnnLstmModel:
         Returns:
             Model summary string
         """
-        if self.model is None:
-            raise ValueError("Model not built yet. Call build_model() first.")
-        
+        from torchinfo import summary
         import io
         import sys
         
         # Capture model summary
         old_stdout = sys.stdout
         sys.stdout = buffer = io.StringIO()
-        self.model.summary()
+        summary(self, input_size=(1, *self.input_shape))
         sys.stdout = old_stdout
         
         return buffer.getvalue()
@@ -181,17 +159,17 @@ class CnnLstmModel:
         Returns:
             Dictionary with model information
         """
-        if self.model is None:
-            raise ValueError("Model not built yet. Call build_model() first.")
+        total_params = sum(p.numel() for p in self.parameters())
+        trainable_params = sum(p.numel() for p in self.parameters() if p.requires_grad)
+        non_trainable_params = total_params - trainable_params
         
         info = {
             'name': self.model_config['name'],
-            'total_params': self.model.count_params(),
-            'trainable_params': sum([tf.keras.backend.count_params(w) for w in self.model.trainable_weights]),
-            'non_trainable_params': sum([tf.keras.backend.count_params(w) for w in self.model.non_trainable_weights]),
-            'input_shape': self.model.input_shape,
-            'output_shape': self.model.output_shape,
-            'layers_count': len(self.model.layers),
+            'total_params': total_params,
+            'trainable_params': trainable_params,
+            'non_trainable_params': non_trainable_params,
+            'input_shape': self.input_shape,
+            'output_shape': (self.num_classes,),
             'config': self.model_config
         }
         
@@ -204,23 +182,47 @@ class CnnLstmModel:
         Args:
             filepath: Path to save the model
         """
-        if self.model is None:
-            raise ValueError("Model not built yet. Call build_model() first.")
-        
         logger.info(f"Saving CNN-LSTM model to {filepath}")
-        self.model.save(filepath)
+        
+        # Change .h5 to .pth if needed
+        if filepath.endswith('.h5'):
+            filepath = filepath.replace('.h5', '.pth')
+        
+        torch.save({
+            'model_state_dict': self.state_dict(),
+            'input_shape': self.input_shape,
+            'num_classes': self.num_classes,
+            'config': self.model_config
+        }, filepath)
         logger.info("Model saved successfully")
     
-    def load_model(self, filepath: str):
+    @classmethod
+    def load_model(cls, filepath: str, config_path: str = "config.yaml"):
         """
         Load a trained model.
         
         Args:
             filepath: Path to the saved model
+            config_path: Path to configuration file
+            
+        Returns:
+            Loaded model instance
         """
         logger.info(f"Loading CNN-LSTM model from {filepath}")
-        self.model = keras.models.load_model(filepath)
+        
+        # Change .h5 to .pth if needed
+        if filepath.endswith('.h5'):
+            filepath = filepath.replace('.h5', '.pth')
+        
+        checkpoint = torch.load(filepath, map_location=torch.device('cpu'))
+        model = cls(
+            input_shape=checkpoint['input_shape'],
+            num_classes=checkpoint['num_classes'],
+            config_path=config_path
+        )
+        model.load_state_dict(checkpoint['model_state_dict'])
         logger.info("Model loaded successfully")
+        return model
     
     def predict(self, X: np.ndarray) -> np.ndarray:
         """
@@ -232,10 +234,14 @@ class CnnLstmModel:
         Returns:
             Predictions array
         """
-        if self.model is None:
-            raise ValueError("Model not loaded yet. Call load_model() or build_model() first.")
-        
-        return self.model.predict(X)
+        self.eval()
+        with torch.no_grad():
+            if isinstance(X, np.ndarray):
+                X = torch.FloatTensor(X)
+            outputs = self.forward(X)
+            # Apply softmax to get probabilities
+            probabilities = self.softmax(outputs)
+            return probabilities.cpu().numpy()
     
     def predict_classes(self, X: np.ndarray) -> np.ndarray:
         """
@@ -251,7 +257,7 @@ class CnnLstmModel:
         return np.argmax(predictions, axis=1)
 
 
-def create_cnn_lstm_model(input_shape: tuple, num_classes: int, config_path: str = "config.yaml") -> keras.Model:
+def create_cnn_lstm_model(input_shape: tuple, num_classes: int, config_path: str = "config.yaml") -> CnnLstmModel:
     """
     Convenience function to create CNN-LSTM model.
     
@@ -261,10 +267,10 @@ def create_cnn_lstm_model(input_shape: tuple, num_classes: int, config_path: str
         config_path: Path to config file
         
     Returns:
-        Compiled Keras model
+        PyTorch CNN-LSTM model
     """
-    model_builder = CnnLstmModel(config_path)
-    model = model_builder.build_model(input_shape, num_classes)
+    model = CnnLstmModel(input_shape, num_classes, config_path)
+    logger.info(f"Built CNN-LSTM model with input shape: {input_shape}")
     return model
 
 
@@ -274,8 +280,7 @@ if __name__ == "__main__":
     num_classes = 5
     
     # Create model
-    cnn_lstm = CnnLstmModel()
-    model = cnn_lstm.build_model(input_shape, num_classes)
+    cnn_lstm = CnnLstmModel(input_shape, num_classes)
     
     # Print model info
     info = cnn_lstm.get_model_info()
@@ -284,6 +289,7 @@ if __name__ == "__main__":
     print(f"Input shape: {info['input_shape']}")
     print(f"Output shape: {info['output_shape']}")
     
-    # Print model summary
-    print("\nModel Summary:")
-    print(cnn_lstm.get_model_summary())
+    # Test forward pass
+    dummy_input = torch.randn(2, *input_shape)
+    output = cnn_lstm(dummy_input)
+    print(f"\nTest forward pass output shape: {output.shape}")
