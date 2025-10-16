@@ -22,7 +22,7 @@ import seaborn as sns
 import yaml
 import logging
 
-from .torch_models import build_torch_model
+from torch_models import build_torch_model
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

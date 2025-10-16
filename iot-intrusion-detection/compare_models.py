@@ -370,22 +370,47 @@ class ModelComparator:
             cnn_lstm_metrics: CNN-LSTM evaluation metrics
         """
         logger.info("Creating ROC curves comparison chart")
-        
-        # Load test data to get true labels and predictions
-        evaluator = IoTEvaluator()
-        X_test, y_test = evaluator.load_test_data()
-        
-        # Load models and get predictions
-        lstm_cnn_model = evaluator.load_model(os.path.join("models", "lstm_cnn_best.h5"))
-        cnn_lstm_model = evaluator.load_model(os.path.join("models", "cnn_lstm_best.h5"))
-        
-        lstm_cnn_pred_prob, _, _ = evaluator.make_predictions(lstm_cnn_model, X_test)
-        cnn_lstm_pred_prob, _, _ = evaluator.make_predictions(cnn_lstm_model, X_test)
+
+        # Try TensorFlow models first; if not present, fall back to PyTorch checkpoints
+        from pathlib import Path
+        tf_lstm = Path("models/lstm_cnn_best.h5")
+        tf_cnn = Path("models/cnn_lstm_best.h5")
+        pt_lstm = Path("models/lstm_cnn_best.pt")
+        pt_cnn = Path("models/cnn_lstm_best.pt")
+
+        if tf_lstm.exists() and tf_cnn.exists():
+            evaluator = IoTEvaluator()
+            X_test, y_test = evaluator.load_test_data()
+            lstm_cnn_model = evaluator.load_model(str(tf_lstm))
+            cnn_lstm_model = evaluator.load_model(str(tf_cnn))
+            lstm_cnn_pred_prob, _, _ = evaluator.make_predictions(lstm_cnn_model, X_test)
+            cnn_lstm_pred_prob, _, _ = evaluator.make_predictions(cnn_lstm_model, X_test)
+            class_names = evaluator.class_names
+        elif pt_lstm.exists() and pt_cnn.exists():
+            # Import torch evaluator lazily
+            sys.path.append(str(Path(__file__).parent / "src"))
+            try:
+                from torch_evaluate import IoTEvaluatorTorch  # type: ignore
+            except Exception as e:
+                logger.error(f"Failed to import IoTEvaluatorTorch: {e}")
+                raise
+            teval = IoTEvaluatorTorch()
+            X_test, y_test = teval.load_test_data()
+            # Build torch models and load weights happen inside evaluate_model for predictions; re-use make_predictions
+            input_shape = X_test.shape[1:]
+            num_classes = y_test.shape[1] if y_test.ndim == 2 else int(np.max(y_test) + 1)
+            lstm_model = teval.load_model(str(pt_lstm), "LSTM-CNN", input_shape, num_classes)
+            cnn_model = teval.load_model(str(pt_cnn), "CNN-LSTM", input_shape, num_classes)
+            lstm_cnn_pred_prob, _, _ = teval.make_predictions(lstm_model, X_test)
+            cnn_lstm_pred_prob, _, _ = teval.make_predictions(cnn_model, X_test)
+            class_names = teval.class_names
+        else:
+            raise FileNotFoundError("Neither TF (.h5) nor PyTorch (.pt) model files found in models/ directory")
         
         # Create plot
         plt.figure(figsize=(12, 8))
         
-        class_names = lstm_cnn_metrics['class_names']
+        class_names = lstm_cnn_metrics.get('class_names', class_names)
         colors = ['blue', 'red', 'green', 'orange', 'purple']
         
         for i, (class_name, color) in enumerate(zip(class_names, colors)):
