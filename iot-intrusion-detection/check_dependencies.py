@@ -8,7 +8,7 @@ def main():
     print("=" * 30)
     
     required_packages = [
-        'tensorflow', 'keras', 'numpy', 'pandas', 
+        'torch', 'torchinfo', 'numpy', 'pandas', 
         'sklearn', 'matplotlib', 'seaborn', 'yaml'
     ]
     
@@ -22,13 +22,13 @@ def main():
             elif package == 'yaml':
                 import yaml
                 print(f"[OK] {package}: {yaml.__version__}")
-            elif package == 'tensorflow':
-                import tensorflow as tf
-                print(f"[OK] {package}: {tf.__version__}")
+            elif package == 'torch':
+                import torch
+                print(f"[OK] {package}: {torch.__version__}")
                 # Check GPU availability
-                gpus = tf.config.list_physical_devices('GPU')
-                if gpus:
-                    print(f"  GPU available: {len(gpus)} device(s)")
+                if torch.cuda.is_available():
+                    print(f"  GPU available: {torch.cuda.device_count()} device(s)")
+                    print(f"  GPU: {torch.cuda.get_device_name(0)}")
                 else:
                     print(f"  GPU: Not available (CPU only)")
             else:
