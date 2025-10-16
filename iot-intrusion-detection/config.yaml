@@ -52,7 +52,7 @@ cnn_lstm:
 # Training Configuration
 training:
   batch_size: 128
-  epochs: 20
+  epochs: 50
   learning_rate: 0.001
   optimizer: "adam"
   loss: "categorical_crossentropy"

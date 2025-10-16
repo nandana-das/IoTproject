@@ -22,6 +22,15 @@ import yaml
 import logging
 from typing import Dict, Any, Tuple, List
 from itertools import cycle
+try:
+    # Package import when importing as src.evaluate
+    from src import resolve_config_path  # type: ignore
+except Exception:
+    try:
+        from __init__ import resolve_config_path  # type: ignore
+    except Exception:
+        def resolve_config_path(default: str = "config.yaml") -> str:  # type: ignore
+            return default
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -30,13 +39,15 @@ logger = logging.getLogger(__name__)
 class IoTEvaluator:
     """Evaluator for IoT intrusion detection models."""
     
-    def __init__(self, config_path: str = "config.yaml"):
+    def __init__(self, config_path: str | None = None):
         """
         Initialize evaluator.
         
         Args:
             config_path: Path to configuration file
         """
+        if config_path is None:
+            config_path = resolve_config_path()
         with open(config_path, 'r') as f:
             self.config = yaml.safe_load(f)
         

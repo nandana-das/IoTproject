@@ -9,12 +9,21 @@ import os
 import logging
 from pathlib import Path
 
-# Add src directory to path
+# Add src directory to path for module imports
 sys.path.append(str(Path(__file__).parent / "src"))
 
 from data_loader import IoTDataLoader
 from preprocessor import IoTPreprocessor
-from src import resolve_config_path
+try:
+    # Prefer importing from package when available
+    from src import resolve_config_path  # type: ignore
+except Exception:
+    try:
+        # Fallback when importing modules directly from added src path
+        from __init__ import resolve_config_path  # type: ignore
+    except Exception:
+        def resolve_config_path(default: str = "config.yaml") -> str:  # type: ignore
+            return default
 from train import train_both_models
 from evaluate import IoTEvaluator
 from compare_models import ModelComparator
@@ -142,3 +151,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    

@@ -1,0 +1,42 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Data and artifacts
+data/processed/
+data/raw/
+models/
+results/
+logs/
+
+# Notebooks
+.ipynb_checkpoints/
+
+# Python packaging
+build/
+dist/
+*.egg-info/
+
+# Environment
+.env
+.venv/
+venv/
+
+# OS files
+Thumbs.db
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+
+# Large arrays and model files
+*.npy
+*.pkl
+*.h5
+*.ckpt
+
+# Misc
+*.zip
+

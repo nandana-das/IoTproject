@@ -94,6 +94,14 @@ def main():
                 trainer.training_config['batch_size'] = desired_bs
         except Exception:
             pass
+        # Allow overriding epochs for quick runs
+        try:
+            desired_epochs = int(os.environ.get("EPOCHS", "0"))
+            if desired_epochs:
+                logger.info(f"Overriding epochs from {trainer.training_config['epochs']} to {desired_epochs}")
+                trainer.training_config['epochs'] = desired_epochs
+        except Exception:
+            pass
         results = trainer.train_cnn_lstm(X_train, y_train, X_val, y_val)
         
         # Step 6: Print results

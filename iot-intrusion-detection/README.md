@@ -15,12 +15,9 @@ This project implements a comprehensive IoT Network Intrusion Detection System c
 ## 📊 Dataset Information
 
 **Dataset**: BoT-IoT (UNSW Canberra Cyber Range)  
-**Location**: `data/raw/` folder (4 CSV files)  
-**Files**:
-- UNSW_2018_IoT_Botnet_Dataset_10_best_1.csv
-- UNSW_2018_IoT_Botnet_Dataset_10_best_2.csv
-- UNSW_2018_IoT_Botnet_Dataset_10_best_3.csv
-- UNSW_2018_IoT_Botnet_Dataset_10_best_4.csv
+**Location**: `data/raw/` folder (single CSV supported by code)  
+**File**:
+- `UNSW_2018_IoT_Botnet_Final_10_Best.csv`
 
 **Total Records**: ~3 million  
 **Features**: 10 network features (pre-selected best features)  
@@ -82,9 +79,9 @@ iot-intrusion-detection/
    pip install -r requirements.txt
    ```
 
-3. **Place dataset files**
-   - Download BoT-IoT dataset files
-   - Place the 4 CSV files in `data/raw/` directory
+3. **Place dataset file**
+   - Download `UNSW_2018_IoT_Botnet_Final_10_Best.csv`
+   - Place it in `data/raw/` directory
 
 ## 📋 Usage Instructions
 

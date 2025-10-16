@@ -4,10 +4,9 @@ Handles loading and combining BoT-IoT dataset files.
 """
 
 import pandas as pd
-import numpy as np
 import glob
 import os
-from typing import Tuple, List
+from typing import Tuple
 import logging
 
 logging.basicConfig(level=logging.INFO)
@@ -36,30 +35,31 @@ class IoTDataLoader:
         Returns:
             Combined DataFrame with all data
         """
-        logger.info(f"Loading data from {self.data_path} with pattern {self.file_pattern}")
+        logger.info(f"Loading data from {self.data_path} with pattern '{self.file_pattern}'")
         
         # Find matching CSV files
         csv_files = glob.glob(os.path.join(self.data_path, self.file_pattern))
         
         if not csv_files:
-            raise FileNotFoundError(f"No CSV files found matching pattern {self.file_pattern} in {self.data_path}")
+            raise FileNotFoundError(f"No CSV files found matching pattern '{self.file_pattern}' in {self.data_path}")
         
-        logger.info(f"Found {len(csv_files)} CSV files: {csv_files}")
+        logger.info(f"Found {len(csv_files)} CSV files: {', '.join(map(os.path.basename, csv_files))}")
         
         # Load and combine all files
         dataframes = []
         for file in csv_files:
             logger.info(f"Loading {file}")
-            df = pd.read_csv(file, sep=';')
+            df = pd.read_csv(file, sep=';', on_bad_lines='skip')
             dataframes.append(df)
             logger.info(f"Loaded {len(df)} rows from {os.path.basename(file)}")
         
-        # Combine all dataframes (or use single dataframe if only one file)
-        if len(dataframes) == 1:
-            self.data = dataframes[0]
-        else:
+        # Combine all dataframes
+        if dataframes:
             self.data = pd.concat(dataframes, ignore_index=True)
-        logger.info(f"Combined dataset shape: {self.data.shape}")
+            logger.info(f"Combined dataset shape: {self.data.shape}")
+        else:
+            self.data = pd.DataFrame()
+            logger.warning("No dataframes to combine.")
         
         return self.data
     
@@ -70,7 +70,7 @@ class IoTDataLoader:
         Returns:
             Dictionary with dataset information
         """
-        if self.data is None:
+        if self.data is None or self.data.empty:
             raise ValueError("No data loaded. Call load_data() first.")
         
         info = {
@@ -99,7 +99,7 @@ class IoTDataLoader:
         Returns:
             Sample DataFrame
         """
-        if self.data is None:
+        if self.data is None or self.data.empty:
             raise ValueError("No data loaded. Call load_data() first.")
         
         return self.data.sample(n=n_samples, random_state=42)
@@ -111,7 +111,7 @@ class IoTDataLoader:
         Args:
             output_path: Path to save the info file
         """
-        if self.data is None:
+        if self.data is None or self.data.empty:
             raise ValueError("No data loaded. Call load_data() first.")
         
         info = self.get_data_info()
@@ -145,7 +145,7 @@ class IoTDataLoader:
         logger.info(f"Dataset information saved to {output_path}")
 
 
-def load_iot_dataset(data_path: str, file_pattern: str = "UNSW_2018_IoT_Botnet_Dataset_10_best_*.csv") -> Tuple[pd.DataFrame, dict]:
+def load_iot_dataset(data_path: str, file_pattern: str = "UNSW_2018_IoT_Botnet_Final_10_Best.csv") -> Tuple[pd.DataFrame, dict]:
     """
     Convenience function to load IoT dataset and return data with info.
     
@@ -166,7 +166,8 @@ def load_iot_dataset(data_path: str, file_pattern: str = "UNSW_2018_IoT_Botnet_D
 if __name__ == "__main__":
     # Example usage
     data_path = "data/raw"
-    loader = IoTDataLoader(data_path)
+    # Set the correct file pattern for your dataset
+    loader = IoTDataLoader(data_path, file_pattern="UNSW_2018_IoT_Botnet_Final_10_Best.csv")
     
     try:
         data = loader.load_data()

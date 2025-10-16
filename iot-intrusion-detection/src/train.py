@@ -15,6 +15,16 @@ import logging
 from typing import Dict, Any, Tuple
 import matplotlib.pyplot as plt
 import seaborn as sns
+try:
+    # Package import when importing as src.train
+    from src import resolve_config_path  # type: ignore
+except Exception:
+    try:
+        # Direct module import when src added to sys.path
+        from __init__ import resolve_config_path  # type: ignore
+    except Exception:
+        def resolve_config_path(default: str = "config.yaml") -> str:  # type: ignore
+            return default
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -23,13 +33,15 @@ logger = logging.getLogger(__name__)
 class IoTModelTrainer:
     """Trainer for IoT intrusion detection models."""
     
-    def __init__(self, config_path: str = "config.yaml"):
+    def __init__(self, config_path: str | None = None):
         """
         Initialize trainer.
         
         Args:
             config_path: Path to configuration file
         """
+        if config_path is None:
+            config_path = resolve_config_path()
         with open(config_path, 'r') as f:
             self.config = yaml.safe_load(f)
         
@@ -87,9 +99,12 @@ class IoTModelTrainer:
         
         # TensorBoard
         tensorboard_path = os.path.join("logs", model_name.lower().replace('-', '_'))
+        # Allow disabling heavy TensorBoard logging for faster epochs via env
+        import os as _os
+        histogram_freq = 0 if _os.environ.get('TENSORBOARD', '1') == '0' else 1
         tensorboard = TensorBoard(
             log_dir=tensorboard_path,
-            histogram_freq=1,
+            histogram_freq=histogram_freq,
             write_graph=True,
             update_freq='epoch'
         )
@@ -99,7 +114,9 @@ class IoTModelTrainer:
         return callbacks
     
     def train_model(self, model: keras.Model, X_train: np.ndarray, y_train: np.ndarray,
-                   X_val: np.ndarray, y_val: np.ndarray, model_name: str) -> Dict[str, Any]:
+                   X_val: np.ndarray, y_val: np.ndarray, model_name: str,
+                   sample_weight: np.ndarray | None = None,
+                   val_sample_weight: np.ndarray | None = None) -> Dict[str, Any]:
         """
         Train a model.
         
@@ -122,14 +139,36 @@ class IoTModelTrainer:
         # Record start time
         start_time = time.time()
         
-        # Train model
-        history = model.fit(
-            X_train, y_train,
-            validation_data=(X_val, y_val),
+        # Determine verbosity: default to epoch-only (2) to avoid per-batch spam; allow env override
+        import os as _os
+        _cfg_verbose = int(self.training_config.get('verbose', 1))
+        _env_verbose = _os.environ.get('VERBOSE')
+        if _env_verbose is not None:
+            _verbose = int(_env_verbose)
+        else:
+            _verbose = 2 if _cfg_verbose == 1 else _cfg_verbose
+
+        # Prepare validation_data optionally with sample weights (older Keras doesn't support validation_sample_weight kwarg)
+        if val_sample_weight is not None:
+            _validation_data = (X_val, y_val, val_sample_weight)
+        else:
+            _validation_data = (X_val, y_val)
+
+        # Build fit kwargs conditionally to avoid unsupported kwargs
+        _fit_kwargs: Dict[str, Any] = dict(
+            validation_data=_validation_data,
             batch_size=self.training_config['batch_size'],
             epochs=self.training_config['epochs'],
             callbacks=callbacks,
-            verbose=self.training_config['verbose']
+            verbose=_verbose,
+        )
+        if sample_weight is not None:
+            _fit_kwargs['sample_weight'] = sample_weight
+
+        # Train model
+        history = model.fit(
+            X_train, y_train,
+            **_fit_kwargs
         )
         
         # Record end time
@@ -347,6 +386,13 @@ def train_both_models(data_path: str = "data/processed") -> Tuple[Dict[str, Any]
     X_val = np.load(os.path.join(data_path, 'X_val.npy'))
     y_train = np.load(os.path.join(data_path, 'y_train.npy'))
     y_val = np.load(os.path.join(data_path, 'y_val.npy'))
+    # Optional: load class weights for sample-weighted training
+    class_weights_path = os.path.join(data_path, 'class_weights.pkl')
+    loaded_class_weights = None
+    if os.path.exists(class_weights_path):
+        import pickle as _pickle
+        with open(class_weights_path, 'rb') as _f:
+            loaded_class_weights = _pickle.load(_f)
 
     # Optional subsampling via env vars for memory-constrained training
     import os as _os
@@ -375,12 +421,48 @@ def train_both_models(data_path: str = "data/processed") -> Tuple[Dict[str, Any]
     except Exception:
         pass
 
+    # Build optional sample weights to handle class imbalance
+    def _build_sample_weights(y_onehot: np.ndarray, class_weights_dict: dict | None) -> np.ndarray | None:
+        if class_weights_dict is None:
+            return None
+        # Convert one-hot labels to indices
+        y_idx = np.argmax(y_onehot, axis=1)
+        # Create vectorized lookup
+        max_class = int(max(class_weights_dict.keys()))
+        table = np.ones(max_class + 1, dtype=np.float32)
+        for k, v in class_weights_dict.items():
+            table[int(k)] = float(v)
+        return table[y_idx]
+
+    use_class_weights = os.environ.get('USE_CLASS_WEIGHTS', '1') == '1'
+    train_sw = _build_sample_weights(y_train, loaded_class_weights) if use_class_weights else None
+    val_sw = _build_sample_weights(y_val, loaded_class_weights) if use_class_weights else None
+
     # Train both models
     logger.info("Training LSTM-CNN model")
-    lstm_cnn_results = trainer.train_lstm_cnn(X_train, y_train, X_val, y_val)
+    lstm_cnn_results = trainer.train_lstm_cnn(X_train, y_train, X_val, y_val) if train_sw is None else \
+        trainer.train_model(
+            model=__import__('lstm_cnn_model').lstm_cnn_model.LSTMCnnModel().build_model(X_train.shape[1:], y_train.shape[1]),
+            X_train=X_train, y_train=y_train, X_val=X_val, y_val=y_val, model_name="LSTM-CNN",
+            sample_weight=train_sw, val_sample_weight=val_sw
+        )
     
     logger.info("Training CNN-LSTM model")
-    cnn_lstm_results = trainer.train_cnn_lstm(X_train, y_train, X_val, y_val)
+    if train_sw is None:
+        cnn_lstm_results = trainer.train_cnn_lstm(X_train, y_train, X_val, y_val)
+    else:
+        # Train with sample weights
+        from cnn_lstm_model import CnnLstmModel
+        model_builder = CnnLstmModel()
+        model = model_builder.build_model(X_train.shape[1:], y_train.shape[1])
+        cnn_lstm_results = trainer.train_model(
+            model=model,
+            X_train=X_train, y_train=y_train,
+            X_val=X_val, y_val=y_val,
+            model_name="CNN-LSTM",
+            sample_weight=train_sw,
+            val_sample_weight=val_sw
+        )
     
     return lstm_cnn_results, cnn_lstm_results
 
