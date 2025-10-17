@@ -73,10 +73,11 @@ def main():
         
         # Step 4: Build model
         logger.info("Step 4: Building CNN-LSTM model")
-        model = CnnLstmModel(X_train.shape[1:], y_train.shape[1])
+        model_builder = CnnLstmModel()
+        model = model_builder.build_model(X_train.shape[1:], y_train.shape[1])
         
         # Print model info
-        model_info = model.get_model_info()
+        model_info = model_builder.get_model_info()
         logger.info(f"Model built: {model_info['name']}")
         logger.info(f"Total parameters: {model_info['total_params']:,}")
         logger.info(f"Input shape: {model_info['input_shape']}")
@@ -115,7 +116,7 @@ def main():
         logger.info(f"Best Epoch: {results['best_epoch']}")
         
         # Save model summary
-        model_summary = model.get_model_summary()
+        model_summary = model_builder.get_model_summary()
         with open("results/reports/cnn_lstm_model_summary.txt", "w", encoding="utf-8") as f:
             f.write("CNN-LSTM Model Summary\n")
             f.write("="*30 + "\n\n")

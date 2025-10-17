@@ -4,11 +4,9 @@ Handles training both LSTM-CNN and CNN-LSTM models with callbacks and monitoring
 """
 
 import numpy as np
-import torch
-import torch.nn as nn
-import torch.optim as optim
-from torch.utils.data import TensorDataset, DataLoader
-from torch.utils.tensorboard import SummaryWriter
+import tensorflow as tf
+from tensorflow import keras
+from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint, ReduceLROnPlateau, TensorBoard
 import json
 import os
 import time
@@ -51,65 +49,71 @@ class IoTModelTrainer:
         self.callbacks_config = self.config['callbacks']
         self.paths_config = self.config['paths']
         
-        # Set device
-        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        logger.info(f"Using device: {self.device}")
-        
         # Set random seeds for reproducibility
         np.random.seed(self.config['preprocessing']['random_state'])
-        torch.manual_seed(self.config['preprocessing']['random_state'])
-        if torch.cuda.is_available():
-            torch.cuda.manual_seed(self.config['preprocessing']['random_state'])
+        tf.random.set_seed(self.config['preprocessing']['random_state'])
     
-    def create_data_loaders(self, X_train: np.ndarray, y_train: np.ndarray,
-                           X_val: np.ndarray, y_val: np.ndarray,
-                           sample_weight: np.ndarray | None = None,
-                           val_sample_weight: np.ndarray | None = None) -> Tuple[DataLoader, DataLoader]:
+    def create_callbacks(self, model_name: str) -> list:
         """
-        Create PyTorch data loaders.
+        Create training callbacks.
         
         Args:
-            X_train, y_train: Training data
-            X_val, y_val: Validation data
-            sample_weight: Training sample weights
-            val_sample_weight: Validation sample weights
+            model_name: Name of the model (for file naming)
             
         Returns:
-            Tuple of (train_loader, val_loader)
+            List of callbacks
         """
-        # Convert to PyTorch tensors
-        X_train_tensor = torch.FloatTensor(X_train)
-        y_train_tensor = torch.FloatTensor(y_train)
-        X_val_tensor = torch.FloatTensor(X_val)
-        y_val_tensor = torch.FloatTensor(y_val)
+        callbacks = []
         
-        # Create datasets
-        if sample_weight is not None:
-            train_dataset = TensorDataset(X_train_tensor, y_train_tensor, torch.FloatTensor(sample_weight))
-        else:
-            train_dataset = TensorDataset(X_train_tensor, y_train_tensor)
-        
-        if val_sample_weight is not None:
-            val_dataset = TensorDataset(X_val_tensor, y_val_tensor, torch.FloatTensor(val_sample_weight))
-        else:
-            val_dataset = TensorDataset(X_val_tensor, y_val_tensor)
-        
-        # Create data loaders
-        train_loader = DataLoader(
-            train_dataset,
-            batch_size=self.training_config['batch_size'],
-            shuffle=True
+        # Early stopping
+        early_stopping = EarlyStopping(
+            monitor=self.callbacks_config['early_stopping']['monitor'],
+            patience=self.callbacks_config['early_stopping']['patience'],
+            restore_best_weights=self.callbacks_config['early_stopping']['restore_best_weights'],
+            verbose=1
         )
+        callbacks.append(early_stopping)
         
-        val_loader = DataLoader(
-            val_dataset,
-            batch_size=self.training_config['batch_size'],
-            shuffle=False
+        # Model checkpoint
+        checkpoint_path = os.path.join(
+            self.paths_config['models'], 
+            f"{model_name.lower().replace('-', '_')}_best.h5"
         )
+        model_checkpoint = ModelCheckpoint(
+            filepath=checkpoint_path,
+            monitor=self.callbacks_config['model_checkpoint']['monitor'],
+            save_best_only=self.callbacks_config['model_checkpoint']['save_best_only'],
+            verbose=1
+        )
+        callbacks.append(model_checkpoint)
         
-        return train_loader, val_loader
+        # Reduce learning rate on plateau
+        reduce_lr = ReduceLROnPlateau(
+            monitor=self.callbacks_config['reduce_lr']['monitor'],
+            factor=self.callbacks_config['reduce_lr']['factor'],
+            patience=self.callbacks_config['reduce_lr']['patience'],
+            min_lr=self.callbacks_config['reduce_lr']['min_lr'],
+            verbose=1
+        )
+        callbacks.append(reduce_lr)
+        
+        # TensorBoard
+        tensorboard_path = os.path.join("logs", model_name.lower().replace('-', '_'))
+        # Allow disabling heavy TensorBoard logging for faster epochs via env
+        import os as _os
+        histogram_freq = 0 if _os.environ.get('TENSORBOARD', '1') == '0' else 1
+        tensorboard = TensorBoard(
+            log_dir=tensorboard_path,
+            histogram_freq=histogram_freq,
+            write_graph=True,
+            update_freq='epoch'
+        )
+        callbacks.append(tensorboard)
+        
+        logger.info(f"Created {len(callbacks)} callbacks for {model_name}")
+        return callbacks
     
-    def train_model(self, model: nn.Module, X_train: np.ndarray, y_train: np.ndarray,
+    def train_model(self, model: keras.Model, X_train: np.ndarray, y_train: np.ndarray,
                    X_val: np.ndarray, y_val: np.ndarray, model_name: str,
                    sample_weight: np.ndarray | None = None,
                    val_sample_weight: np.ndarray | None = None) -> Dict[str, Any]:
@@ -117,12 +121,10 @@ class IoTModelTrainer:
         Train a model.
         
         Args:
-            model: PyTorch model to train
+            model: Keras model to train
             X_train, y_train: Training data
             X_val, y_val: Validation data
             model_name: Name of the model
-            sample_weight: Training sample weights
-            val_sample_weight: Validation sample weights
             
         Returns:
             Dictionary with training results
@@ -131,222 +133,71 @@ class IoTModelTrainer:
         logger.info(f"Training data shape: {X_train.shape} -> {y_train.shape}")
         logger.info(f"Validation data shape: {X_val.shape} -> {y_val.shape}")
         
-        # Move model to device
-        model = model.to(self.device)
-        
-        # Create data loaders
-        train_loader, val_loader = self.create_data_loaders(
-            X_train, y_train, X_val, y_val, sample_weight, val_sample_weight
-        )
-        
-        # Setup optimizer
-        optimizer = optim.Adam(
-            model.parameters(),
-            lr=self.training_config['learning_rate']
-        )
-        
-        # Setup loss function
-        criterion = nn.CrossEntropyLoss(reduction='none')  # We'll handle weights manually
-        
-        # Setup learning rate scheduler
-        scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer,
-            mode='min',
-            factor=self.callbacks_config['reduce_lr']['factor'],
-            patience=self.callbacks_config['reduce_lr']['patience'],
-            min_lr=self.callbacks_config['reduce_lr']['min_lr'],
-            verbose=True
-        )
-        
-        # Setup TensorBoard
-        tensorboard_path = os.path.join("logs", model_name.lower().replace('-', '_'))
-        writer = SummaryWriter(tensorboard_path)
-        
-        # Model checkpoint path
-        checkpoint_path = os.path.join(
-            self.paths_config['models'], 
-            f"{model_name.lower().replace('-', '_')}_best.pth"
-        )
-        
-        # Training history
-        history = {
-            'loss': [],
-            'accuracy': [],
-            'val_loss': [],
-            'val_accuracy': []
-        }
-        
-        # Early stopping variables
-        best_val_loss = float('inf')
-        best_epoch = 0
-        patience_counter = 0
+        # Create callbacks
+        callbacks = self.create_callbacks(model_name)
         
         # Record start time
         start_time = time.time()
         
-        # Training loop
-        for epoch in range(self.training_config['epochs']):
-            # Training phase
-            model.train()
-            train_loss = 0.0
-            train_correct = 0
-            train_total = 0
-            
-            for batch_data in train_loader:
-                if len(batch_data) == 3:
-                    inputs, targets, weights = batch_data
-                    weights = weights.to(self.device)
-                else:
-                    inputs, targets = batch_data
-                    weights = None
-                
-                inputs = inputs.to(self.device)
-                targets = targets.to(self.device)
-                
-                # Zero gradients
-                optimizer.zero_grad()
-                
-                # Forward pass
-                outputs = model(inputs)
-                
-                # Calculate loss
-                loss_per_sample = criterion(outputs, targets.argmax(dim=1))
-                if weights is not None:
-                    loss = (loss_per_sample * weights).mean()
-                else:
-                    loss = loss_per_sample.mean()
-                
-                # Backward pass
-                loss.backward()
-                optimizer.step()
-                
-                # Statistics
-                train_loss += loss.item() * inputs.size(0)
-                _, predicted = outputs.max(1)
-                _, target_labels = targets.max(1)
-                train_correct += predicted.eq(target_labels).sum().item()
-                train_total += targets.size(0)
-            
-            # Calculate training metrics
-            epoch_train_loss = train_loss / train_total
-            epoch_train_acc = train_correct / train_total
-            
-            # Validation phase
-            model.eval()
-            val_loss = 0.0
-            val_correct = 0
-            val_total = 0
-            
-            with torch.no_grad():
-                for batch_data in val_loader:
-                    if len(batch_data) == 3:
-                        inputs, targets, weights = batch_data
-                        weights = weights.to(self.device)
-                    else:
-                        inputs, targets = batch_data
-                        weights = None
-                    
-                    inputs = inputs.to(self.device)
-                    targets = targets.to(self.device)
-                    
-                    # Forward pass
-                    outputs = model(inputs)
-                    
-                    # Calculate loss
-                    loss_per_sample = criterion(outputs, targets.argmax(dim=1))
-                    if weights is not None:
-                        loss = (loss_per_sample * weights).mean()
-                    else:
-                        loss = loss_per_sample.mean()
-                    
-                    # Statistics
-                    val_loss += loss.item() * inputs.size(0)
-                    _, predicted = outputs.max(1)
-                    _, target_labels = targets.max(1)
-                    val_correct += predicted.eq(target_labels).sum().item()
-                    val_total += targets.size(0)
-            
-            # Calculate validation metrics
-            epoch_val_loss = val_loss / val_total
-            epoch_val_acc = val_correct / val_total
-            
-            # Update history
-            history['loss'].append(epoch_train_loss)
-            history['accuracy'].append(epoch_train_acc)
-            history['val_loss'].append(epoch_val_loss)
-            history['val_accuracy'].append(epoch_val_acc)
-            
-            # Log to TensorBoard
-            writer.add_scalar('Loss/train', epoch_train_loss, epoch)
-            writer.add_scalar('Loss/val', epoch_val_loss, epoch)
-            writer.add_scalar('Accuracy/train', epoch_train_acc, epoch)
-            writer.add_scalar('Accuracy/val', epoch_val_acc, epoch)
-            writer.add_scalar('Learning Rate', optimizer.param_groups[0]['lr'], epoch)
-            
-            # Print progress
-            logger.info(f"Epoch {epoch + 1}/{self.training_config['epochs']}: "
-                       f"Train Loss: {epoch_train_loss:.4f}, Train Acc: {epoch_train_acc:.4f}, "
-                       f"Val Loss: {epoch_val_loss:.4f}, Val Acc: {epoch_val_acc:.4f}")
-            
-            # Learning rate scheduling
-            scheduler.step(epoch_val_loss)
-            
-            # Model checkpoint (save best model)
-            if epoch_val_loss < best_val_loss:
-                best_val_loss = epoch_val_loss
-                best_epoch = epoch
-                patience_counter = 0
-                
-                # Save model
-                torch.save({
-                    'epoch': epoch,
-                    'model_state_dict': model.state_dict(),
-                    'optimizer_state_dict': optimizer.state_dict(),
-                    'val_loss': epoch_val_loss,
-                    'val_accuracy': epoch_val_acc,
-                    'input_shape': model.input_shape,
-                    'num_classes': model.num_classes,
-                }, checkpoint_path)
-                logger.info(f"Saved best model to {checkpoint_path}")
-            else:
-                patience_counter += 1
-            
-            # Early stopping
-            if patience_counter >= self.callbacks_config['early_stopping']['patience']:
-                logger.info(f"Early stopping triggered at epoch {epoch + 1}")
-                break
-        
-        # Close TensorBoard writer
-        writer.close()
-        
-        # Load best model
-        if self.callbacks_config['early_stopping']['restore_best_weights']:
-            checkpoint = torch.load(checkpoint_path, weights_only=False)
-            model.load_state_dict(checkpoint['model_state_dict'])
-            logger.info("Restored best model weights")
+        # Determine verbosity: default to epoch-only (2) to avoid per-batch spam; allow env override
+        import os as _os
+        _cfg_verbose = int(self.training_config.get('verbose', 1))
+        _env_verbose = _os.environ.get('VERBOSE')
+        if _env_verbose is not None:
+            _verbose = int(_env_verbose)
+        else:
+            _verbose = 2 if _cfg_verbose == 1 else _cfg_verbose
+
+        # Prepare validation_data optionally with sample weights (older Keras doesn't support validation_sample_weight kwarg)
+        if val_sample_weight is not None:
+            _validation_data = (X_val, y_val, val_sample_weight)
+        else:
+            _validation_data = (X_val, y_val)
+
+        # Build fit kwargs conditionally to avoid unsupported kwargs
+        _fit_kwargs: Dict[str, Any] = dict(
+            validation_data=_validation_data,
+            batch_size=self.training_config['batch_size'],
+            epochs=self.training_config['epochs'],
+            callbacks=callbacks,
+            verbose=_verbose,
+        )
+        if sample_weight is not None:
+            _fit_kwargs['sample_weight'] = sample_weight
+
+        # Train model
+        history = model.fit(
+            X_train, y_train,
+            **_fit_kwargs
+        )
         
         # Record end time
         end_time = time.time()
         training_time = end_time - start_time
         
+        # Get best metrics
+        best_epoch = np.argmin(history.history['val_loss'])
+        best_val_loss = history.history['val_loss'][best_epoch]
+        best_val_accuracy = history.history['val_accuracy'][best_epoch]
+        
         # Prepare results
         results = {
             'model_name': model_name,
             'training_time_minutes': training_time / 60,
-            'total_epochs': len(history['loss']),
+            'total_epochs': len(history.history['loss']),
             'best_epoch': best_epoch + 1,
             'best_val_loss': best_val_loss,
-            'best_val_accuracy': history['val_accuracy'][best_epoch],
-            'final_train_loss': history['loss'][-1],
-            'final_train_accuracy': history['accuracy'][-1],
-            'final_val_loss': history['val_loss'][-1],
-            'final_val_accuracy': history['val_accuracy'][-1],
-            'history': history
+            'best_val_accuracy': best_val_accuracy,
+            'final_train_loss': history.history['loss'][-1],
+            'final_train_accuracy': history.history['accuracy'][-1],
+            'final_val_loss': history.history['val_loss'][-1],
+            'final_val_accuracy': history.history['val_accuracy'][-1],
+            'history': history.history
         }
         
         logger.info(f"Training completed for {model_name}")
         logger.info(f"Training time: {training_time/60:.2f} minutes")
-        logger.info(f"Best validation accuracy: {history['val_accuracy'][best_epoch]:.4f} at epoch {best_epoch + 1}")
+        logger.info(f"Best validation accuracy: {best_val_accuracy:.4f} at epoch {best_epoch + 1}")
         
         return results
     
@@ -448,17 +299,13 @@ class IoTModelTrainer:
         logger.info(f"Training curves saved to {output_path}")
     
     def train_lstm_cnn(self, X_train: np.ndarray, y_train: np.ndarray, 
-                      X_val: np.ndarray, y_val: np.ndarray,
-                      sample_weight: np.ndarray | None = None,
-                      val_sample_weight: np.ndarray | None = None) -> Dict[str, Any]:
+                      X_val: np.ndarray, y_val: np.ndarray) -> Dict[str, Any]:
         """
         Train LSTM-CNN model.
         
         Args:
             X_train, y_train: Training data
             X_val, y_val: Validation data
-            sample_weight: Training sample weights
-            val_sample_weight: Validation sample weights
             
         Returns:
             Training results
@@ -466,11 +313,11 @@ class IoTModelTrainer:
         from lstm_cnn_model import LSTMCnnModel
         
         # Build model
-        model = LSTMCnnModel(X_train.shape[1:], y_train.shape[1])
+        model_builder = LSTMCnnModel()
+        model = model_builder.build_model(X_train.shape[1:], y_train.shape[1])
         
         # Train model
-        results = self.train_model(model, X_train, y_train, X_val, y_val, "LSTM-CNN",
-                                  sample_weight, val_sample_weight)
+        results = self.train_model(model, X_train, y_train, X_val, y_val, "LSTM-CNN")
         
         # Save results
         self.save_training_results(
@@ -487,17 +334,13 @@ class IoTModelTrainer:
         return results
     
     def train_cnn_lstm(self, X_train: np.ndarray, y_train: np.ndarray, 
-                      X_val: np.ndarray, y_val: np.ndarray,
-                      sample_weight: np.ndarray | None = None,
-                      val_sample_weight: np.ndarray | None = None) -> Dict[str, Any]:
+                      X_val: np.ndarray, y_val: np.ndarray) -> Dict[str, Any]:
         """
         Train CNN-LSTM model.
         
         Args:
             X_train, y_train: Training data
             X_val, y_val: Validation data
-            sample_weight: Training sample weights
-            val_sample_weight: Validation sample weights
             
         Returns:
             Training results
@@ -505,11 +348,11 @@ class IoTModelTrainer:
         from cnn_lstm_model import CnnLstmModel
         
         # Build model
-        model = CnnLstmModel(X_train.shape[1:], y_train.shape[1])
+        model_builder = CnnLstmModel()
+        model = model_builder.build_model(X_train.shape[1:], y_train.shape[1])
         
         # Train model
-        results = self.train_model(model, X_train, y_train, X_val, y_val, "CNN-LSTM",
-                                  sample_weight, val_sample_weight)
+        results = self.train_model(model, X_train, y_train, X_val, y_val, "CNN-LSTM")
         
         # Save results
         self.save_training_results(
@@ -543,7 +386,6 @@ def train_both_models(data_path: str = "data/processed") -> Tuple[Dict[str, Any]
     X_val = np.load(os.path.join(data_path, 'X_val.npy'))
     y_train = np.load(os.path.join(data_path, 'y_train.npy'))
     y_val = np.load(os.path.join(data_path, 'y_val.npy'))
-    
     # Optional: load class weights for sample-weighted training
     class_weights_path = os.path.join(data_path, 'class_weights.pkl')
     loaded_class_weights = None
@@ -598,10 +440,29 @@ def train_both_models(data_path: str = "data/processed") -> Tuple[Dict[str, Any]
 
     # Train both models
     logger.info("Training LSTM-CNN model")
-    lstm_cnn_results = trainer.train_lstm_cnn(X_train, y_train, X_val, y_val, train_sw, val_sw)
+    lstm_cnn_results = trainer.train_lstm_cnn(X_train, y_train, X_val, y_val) if train_sw is None else \
+        trainer.train_model(
+            model=__import__('lstm_cnn_model').lstm_cnn_model.LSTMCnnModel().build_model(X_train.shape[1:], y_train.shape[1]),
+            X_train=X_train, y_train=y_train, X_val=X_val, y_val=y_val, model_name="LSTM-CNN",
+            sample_weight=train_sw, val_sample_weight=val_sw
+        )
     
     logger.info("Training CNN-LSTM model")
-    cnn_lstm_results = trainer.train_cnn_lstm(X_train, y_train, X_val, y_val, train_sw, val_sw)
+    if train_sw is None:
+        cnn_lstm_results = trainer.train_cnn_lstm(X_train, y_train, X_val, y_val)
+    else:
+        # Train with sample weights
+        from cnn_lstm_model import CnnLstmModel
+        model_builder = CnnLstmModel()
+        model = model_builder.build_model(X_train.shape[1:], y_train.shape[1])
+        cnn_lstm_results = trainer.train_model(
+            model=model,
+            X_train=X_train, y_train=y_train,
+            X_val=X_val, y_val=y_val,
+            model_name="CNN-LSTM",
+            sample_weight=train_sw,
+            val_sample_weight=val_sw
+        )
     
     return lstm_cnn_results, cnn_lstm_results
 
