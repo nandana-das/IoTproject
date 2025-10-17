@@ -95,16 +95,21 @@ class IoTModelTrainer:
             val_dataset = TensorDataset(X_val_tensor, y_val_tensor)
         
         # Create data loaders
+        # Set num_workers=0 and pin_memory=False for Windows compatibility
         train_loader = DataLoader(
             train_dataset,
             batch_size=self.training_config['batch_size'],
-            shuffle=True
+            shuffle=True,
+            num_workers=0,
+            pin_memory=False
         )
         
         val_loader = DataLoader(
             val_dataset,
             batch_size=self.training_config['batch_size'],
-            shuffle=False
+            shuffle=False,
+            num_workers=0,
+            pin_memory=False
         )
         
         return train_loader, val_loader
@@ -192,7 +197,11 @@ class IoTModelTrainer:
             train_correct = 0
             train_total = 0
             
-            for batch_data in train_loader:
+            # Progress tracking
+            total_batches = len(train_loader)
+            log_interval = max(1, total_batches // 10)  # Log every 10% of batches
+            
+            for batch_idx, batch_data in enumerate(train_loader):
                 if len(batch_data) == 3:
                     inputs, targets, weights = batch_data
                     weights = weights.to(self.device)
@@ -226,6 +235,15 @@ class IoTModelTrainer:
                 _, target_labels = targets.max(1)
                 train_correct += predicted.eq(target_labels).sum().item()
                 train_total += targets.size(0)
+                
+                # Log progress periodically
+                if (batch_idx + 1) % log_interval == 0:
+                    progress = (batch_idx + 1) / total_batches * 100
+                    current_loss = train_loss / train_total
+                    current_acc = train_correct / train_total
+                    logger.info(f"Epoch {epoch + 1}/{self.training_config['epochs']} - "
+                               f"Batch {batch_idx + 1}/{total_batches} ({progress:.1f}%) - "
+                               f"Loss: {current_loss:.4f}, Acc: {current_acc:.4f}")
             
             # Calculate training metrics
             epoch_train_loss = train_loss / train_total
