@@ -6,9 +6,12 @@ __pycache__/
 # Data and artifacts
 data/processed/
 data/raw/
-models/
-results/
 logs/
+# Allow trained models and results
+!models/*.h5
+!results/metrics/
+!results/plots/
+!results/reports/
 
 # Notebooks
 .ipynb_checkpoints/
