@@ -94,17 +94,32 @@ class IoTModelTrainer:
         else:
             val_dataset = TensorDataset(X_val_tensor, y_val_tensor)
         
+        # DataLoader settings (Windows/GPU safe)
+        # Allow overriding number of workers via env, default to 0 for Windows safety
+        try:
+            num_workers = int(os.environ.get('NUM_WORKERS', '0'))
+        except Exception:
+            num_workers = 0
+        # Use pinned memory when transferring tensors to CUDA for faster host->device copies
+        pin_memory = (self.device.type == 'cuda')
+
         # Create data loaders
         train_loader = DataLoader(
             train_dataset,
             batch_size=self.training_config['batch_size'],
-            shuffle=True
+            shuffle=True,
+            num_workers=num_workers,
+            pin_memory=pin_memory,
+            persistent_workers=False
         )
-        
+
         val_loader = DataLoader(
             val_dataset,
             batch_size=self.training_config['batch_size'],
-            shuffle=False
+            shuffle=False,
+            num_workers=num_workers,
+            pin_memory=pin_memory,
+            persistent_workers=False
         )
         
         return train_loader, val_loader
@@ -184,6 +199,21 @@ class IoTModelTrainer:
         # Record start time
         start_time = time.time()
         
+        # Pre-compute loader lengths for progress reporting
+        try:
+            total_train_batches = len(train_loader)
+        except TypeError:
+            total_train_batches = None
+        try:
+            total_val_batches = len(val_loader)
+        except TypeError:
+            total_val_batches = None
+
+        if total_train_batches is not None:
+            logger.info(
+                f"{model_name}: {total_train_batches:,} batches/epoch at batch_size {self.training_config['batch_size']}"
+            )
+
         # Training loop
         for epoch in range(self.training_config['epochs']):
             # Training phase
@@ -191,8 +221,16 @@ class IoTModelTrainer:
             train_loss = 0.0
             train_correct = 0
             train_total = 0
+            epoch_start_time = time.time()
+
+            # Determine progress logging cadence (~20 times per epoch, at least every 100 batches)
+            if total_train_batches:
+                progress_interval = max(100, total_train_batches // 20)
+            else:
+                progress_interval = 500
+            last_progress_log_t = time.time()
             
-            for batch_data in train_loader:
+            for batch_idx, batch_data in enumerate(train_loader):
                 if len(batch_data) == 3:
                     inputs, targets, weights = batch_data
                     weights = weights.to(self.device)
@@ -226,6 +264,18 @@ class IoTModelTrainer:
                 _, target_labels = targets.max(1)
                 train_correct += predicted.eq(target_labels).sum().item()
                 train_total += targets.size(0)
+
+                # Periodic progress log
+                if total_train_batches:
+                    need_time_log = (time.time() - last_progress_log_t) >= 30
+                    need_idx_log = ((batch_idx + 1) % progress_interval) == 0
+                    if need_time_log or need_idx_log:
+                        percent = 100.0 * (batch_idx + 1) / max(1, total_train_batches)
+                        logger.info(
+                            f"{model_name} Epoch {epoch + 1}/{self.training_config['epochs']} - "
+                            f"Batch {batch_idx + 1:,}/{total_train_batches:,} ({percent:.1f}%)"
+                        )
+                        last_progress_log_t = time.time()
             
             # Calculate training metrics
             epoch_train_loss = train_loss / train_total
@@ -238,7 +288,10 @@ class IoTModelTrainer:
             val_total = 0
             
             with torch.no_grad():
-                for batch_data in val_loader:
+                if total_val_batches:
+                    val_progress_interval = max(50, total_val_batches // 10)
+                    last_val_log_t = time.time()
+                for val_batch_idx, batch_data in enumerate(val_loader):
                     if len(batch_data) == 3:
                         inputs, targets, weights = batch_data
                         weights = weights.to(self.device)
@@ -265,6 +318,15 @@ class IoTModelTrainer:
                     _, target_labels = targets.max(1)
                     val_correct += predicted.eq(target_labels).sum().item()
                     val_total += targets.size(0)
+
+                    # Periodic progress log for validation
+                    if total_val_batches and (((val_batch_idx + 1) % val_progress_interval) == 0 or (time.time() - last_val_log_t) >= 30):
+                        percent = 100.0 * (val_batch_idx + 1) / max(1, total_val_batches)
+                        logger.info(
+                            f"{model_name} Epoch {epoch + 1}/{self.training_config['epochs']} - "
+                            f"Val Batch {val_batch_idx + 1:,}/{total_val_batches:,} ({percent:.1f}%)"
+                        )
+                        last_val_log_t = time.time()
             
             # Calculate validation metrics
             epoch_val_loss = val_loss / val_total
@@ -284,9 +346,13 @@ class IoTModelTrainer:
             writer.add_scalar('Learning Rate', optimizer.param_groups[0]['lr'], epoch)
             
             # Print progress
-            logger.info(f"Epoch {epoch + 1}/{self.training_config['epochs']}: "
-                       f"Train Loss: {epoch_train_loss:.4f}, Train Acc: {epoch_train_acc:.4f}, "
-                       f"Val Loss: {epoch_val_loss:.4f}, Val Acc: {epoch_val_acc:.4f}")
+            epoch_elapsed = time.time() - epoch_start_time
+            logger.info(
+                f"Epoch {epoch + 1}/{self.training_config['epochs']}: "
+                f"Train Loss: {epoch_train_loss:.4f}, Train Acc: {epoch_train_acc:.4f}, "
+                f"Val Loss: {epoch_val_loss:.4f}, Val Acc: {epoch_val_acc:.4f}, "
+                f"Time: {epoch_elapsed:.1f}s"
+            )
             
             # Learning rate scheduling
             scheduler.step(epoch_val_loss)
