@@ -43,7 +43,7 @@ class LSTMCnnModel(nn.Module):
             input_size=num_features,
             hidden_size=self.model_config['lstm_units_1'],
             batch_first=True,
-            dropout=self.model_config['lstm_dropout'] if self.model_config['lstm_dropout'] > 0 else 0
+            dropout=0  # Dropout handled separately
         )
         self.lstm1_dropout = nn.Dropout(self.model_config['lstm_dropout'])
         
@@ -51,7 +51,7 @@ class LSTMCnnModel(nn.Module):
             input_size=self.model_config['lstm_units_1'],
             hidden_size=self.model_config['lstm_units_2'],
             batch_first=True,
-            dropout=self.model_config['lstm_dropout'] if self.model_config['lstm_dropout'] > 0 else 0
+            dropout=0  # Dropout handled separately
         )
         self.lstm2_dropout = nn.Dropout(self.model_config['lstm_dropout'])
         
@@ -211,7 +211,7 @@ class LSTMCnnModel(nn.Module):
         if filepath.endswith('.h5'):
             filepath = filepath.replace('.h5', '.pth')
         
-        checkpoint = torch.load(filepath, map_location=torch.device('cpu'))
+        checkpoint = torch.load(filepath, map_location=torch.device('cpu'), weights_only=False)
         model = cls(
             input_shape=checkpoint['input_shape'],
             num_classes=checkpoint['num_classes'],
@@ -235,6 +235,9 @@ class LSTMCnnModel(nn.Module):
         with torch.no_grad():
             if isinstance(X, np.ndarray):
                 X = torch.FloatTensor(X)
+            # Move input to same device as model
+            device = next(self.parameters()).device
+            X = X.to(device)
             outputs = self.forward(X)
             # Apply softmax to get probabilities
             probabilities = self.softmax(outputs)

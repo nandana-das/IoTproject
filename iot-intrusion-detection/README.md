@@ -224,8 +224,8 @@ Edit `config.yaml` to modify:
 ## 📁 Output Files
 
 ### Models
-- `models/lstm_cnn_best.h5` - Best LSTM-CNN model
-- `models/cnn_lstm_best.h5` - Best CNN-LSTM model
+- `models/lstm_cnn_best.pth` - Best LSTM-CNN model
+- `models/cnn_lstm_best.pth` - Best CNN-LSTM model
 
 ### Results
 - `results/plots/` - Training curves, confusion matrices, ROC curves

@@ -67,7 +67,7 @@ class CnnLstmModel(nn.Module):
             input_size=self.model_config['conv_filters_2'],
             hidden_size=self.model_config['lstm_units'],
             batch_first=True,
-            dropout=self.model_config['lstm_dropout'] if self.model_config['lstm_dropout'] > 0 else 0
+            dropout=0  # Dropout handled separately
         )
         self.lstm_dropout = nn.Dropout(self.model_config['lstm_dropout'])
         
@@ -214,7 +214,7 @@ class CnnLstmModel(nn.Module):
         if filepath.endswith('.h5'):
             filepath = filepath.replace('.h5', '.pth')
         
-        checkpoint = torch.load(filepath, map_location=torch.device('cpu'))
+        checkpoint = torch.load(filepath, map_location=torch.device('cpu'), weights_only=False)
         model = cls(
             input_shape=checkpoint['input_shape'],
             num_classes=checkpoint['num_classes'],
@@ -238,6 +238,9 @@ class CnnLstmModel(nn.Module):
         with torch.no_grad():
             if isinstance(X, np.ndarray):
                 X = torch.FloatTensor(X)
+            # Move input to same device as model
+            device = next(self.parameters()).device
+            X = X.to(device)
             outputs = self.forward(X)
             # Apply softmax to get probabilities
             probabilities = self.softmax(outputs)

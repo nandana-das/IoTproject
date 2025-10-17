@@ -321,7 +321,7 @@ class IoTModelTrainer:
         
         # Load best model
         if self.callbacks_config['early_stopping']['restore_best_weights']:
-            checkpoint = torch.load(checkpoint_path)
+            checkpoint = torch.load(checkpoint_path, weights_only=False)
             model.load_state_dict(checkpoint['model_state_dict'])
             logger.info("Restored best model weights")
         

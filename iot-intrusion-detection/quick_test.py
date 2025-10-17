@@ -81,29 +81,31 @@ def main():
     
     # Test LSTM-CNN model
     from lstm_cnn_model import LSTMCnnModel
-    lstm_cnn = LSTMCnnModel()
-    lstm_cnn_model = lstm_cnn.build_model(X_train_seq.shape[1:], y_train_onehot.shape[1])
+    lstm_cnn_model = LSTMCnnModel(X_train_seq.shape[1:], y_train_onehot.shape[1])
     print(f"   LSTM-CNN model built successfully")
     
     # Test CNN-LSTM model
     from cnn_lstm_model import CnnLstmModel
-    cnn_lstm = CnnLstmModel()
-    cnn_lstm_model = cnn_lstm.build_model(X_train_seq.shape[1:], y_train_onehot.shape[1])
+    cnn_lstm_model = CnnLstmModel(X_train_seq.shape[1:], y_train_onehot.shape[1])
     print(f"   CNN-LSTM model built successfully")
     
     # Quick training test (just 1 epoch)
     print("\n4. Quick training test (1 epoch)...")
     trainer = IoTModelTrainer()
     
+    # Override epochs for quick test
+    trainer.training_config['epochs'] = 1
+    trainer.training_config['batch_size'] = 64
+    
     # Train LSTM-CNN for 1 epoch
-    lstm_cnn_model.fit(X_train_seq, y_train_onehot, 
-                      validation_data=(X_val_seq, y_val_onehot),
-                      batch_size=64, epochs=1, verbose=1)
+    print("   Training LSTM-CNN...")
+    lstm_cnn_results = trainer.train_model(lstm_cnn_model, X_train_seq, y_train_onehot, 
+                                          X_val_seq, y_val_onehot, "LSTM-CNN")
     
     # Train CNN-LSTM for 1 epoch
-    cnn_lstm_model.fit(X_train_seq, y_train_onehot,
-                      validation_data=(X_val_seq, y_val_onehot),
-                      batch_size=64, epochs=1, verbose=1)
+    print("   Training CNN-LSTM...")
+    cnn_lstm_results = trainer.train_model(cnn_lstm_model, X_train_seq, y_train_onehot,
+                                          X_val_seq, y_val_onehot, "CNN-LSTM")
     
     print("\n5. Quick evaluation test...")
     

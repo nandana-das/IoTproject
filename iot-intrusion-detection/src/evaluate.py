@@ -102,7 +102,7 @@ class IoTEvaluator:
             model_path = model_path.replace('.h5', '.pth')
         
         # Load checkpoint
-        checkpoint = torch.load(model_path, map_location=self.device)
+        checkpoint = torch.load(model_path, map_location=self.device, weights_only=False)
         
         # Import the appropriate model class
         if model_type.lower() == "lstm_cnn" or "lstm_cnn" in model_path.lower():

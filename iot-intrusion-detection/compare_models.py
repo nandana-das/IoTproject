@@ -376,8 +376,8 @@ class ModelComparator:
         X_test, y_test = evaluator.load_test_data()
         
         # Load models and get predictions
-        lstm_cnn_model = evaluator.load_model(os.path.join("models", "lstm_cnn_best.h5"))
-        cnn_lstm_model = evaluator.load_model(os.path.join("models", "cnn_lstm_best.h5"))
+        lstm_cnn_model = evaluator.load_model(os.path.join("models", "lstm_cnn_best.pth"))
+        cnn_lstm_model = evaluator.load_model(os.path.join("models", "cnn_lstm_best.pth"))
         
         lstm_cnn_pred_prob, _, _ = evaluator.make_predictions(lstm_cnn_model, X_test)
         cnn_lstm_pred_prob, _, _ = evaluator.make_predictions(cnn_lstm_model, X_test)
