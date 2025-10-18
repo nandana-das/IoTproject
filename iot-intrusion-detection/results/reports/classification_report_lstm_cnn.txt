@@ -1,0 +1,17 @@
+LSTM-CNN - Classification Report
+==================================================
+
+                precision    recall  f1-score   support
+
+          DDoS     0.9341    0.8358    0.8822    288987
+           DoS     0.8130    0.9404    0.8721    247532
+        Normal     0.0000    0.0000    0.0000        72
+Reconnaissance     0.9544    0.3738    0.5372     13662
+         Theft     0.0000    0.0000    0.0000        12
+
+      accuracy                         0.8713    550265
+     macro avg     0.5403    0.4300    0.4583    550265
+  weighted avg     0.8800    0.8713    0.8689    550265
+
+
+Generated on: 2025-10-18 10:21:42

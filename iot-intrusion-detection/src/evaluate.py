@@ -5,8 +5,8 @@ Handles comprehensive evaluation including metrics, confusion matrix, ROC curves
 
 import numpy as np
 import pandas as pd
-import torch
-import torch.nn as nn
+import tensorflow as tf
+from tensorflow import keras
 from sklearn.metrics import (
     accuracy_score, precision_score, recall_score, f1_score,
     confusion_matrix, classification_report, roc_curve, auc,
@@ -55,7 +55,6 @@ class IoTEvaluator:
         self.eval_config = self.config['evaluation']
         self.class_names = None
         self.label_encoder = None
-        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         
     def load_test_data(self, data_path: str = "data/processed") -> Tuple[np.ndarray, np.ndarray]:
         """
@@ -84,50 +83,22 @@ class IoTEvaluator:
         
         return X_test, y_test
     
-    def load_model(self, model_path: str, model_type: str = "lstm_cnn") -> nn.Module:
+    def load_model(self, model_path: str) -> keras.Model:
         """
         Load a trained model.
         
         Args:
             model_path: Path to saved model
-            model_type: Type of model ("lstm_cnn" or "cnn_lstm")
             
         Returns:
-            Loaded PyTorch model
+            Loaded Keras model
         """
         logger.info(f"Loading model from {model_path}")
-        
-        # Change .h5 to .pth if needed
-        if model_path.endswith('.h5'):
-            model_path = model_path.replace('.h5', '.pth')
-        
-        # Load checkpoint
-        checkpoint = torch.load(model_path, map_location=self.device, weights_only=False)
-        
-        # Import the appropriate model class
-        if model_type.lower() == "lstm_cnn" or "lstm_cnn" in model_path.lower():
-            from lstm_cnn_model import LSTMCnnModel
-            model = LSTMCnnModel(
-                input_shape=checkpoint['input_shape'],
-                num_classes=checkpoint['num_classes']
-            )
-        elif model_type.lower() == "cnn_lstm" or "cnn_lstm" in model_path.lower():
-            from cnn_lstm_model import CnnLstmModel
-            model = CnnLstmModel(
-                input_shape=checkpoint['input_shape'],
-                num_classes=checkpoint['num_classes']
-            )
-        else:
-            raise ValueError(f"Unknown model type: {model_type}")
-        
-        model.load_state_dict(checkpoint['model_state_dict'])
-        model = model.to(self.device)
-        model.eval()
-        
+        model = keras.models.load_model(model_path)
         logger.info("Model loaded successfully")
         return model
     
-    def make_predictions(self, model: nn.Module, X_test: np.ndarray) -> Tuple[np.ndarray, np.ndarray, float]:
+    def make_predictions(self, model: keras.Model, X_test: np.ndarray) -> Tuple[np.ndarray, np.ndarray, float]:
         """
         Make predictions on test data and measure inference time.
         
@@ -140,23 +111,15 @@ class IoTEvaluator:
         """
         logger.info("Making predictions on test data")
         
-        model.eval()
-        
-        # Convert to tensor
-        X_test_tensor = torch.FloatTensor(X_test).to(self.device)
-        
         # Measure inference time
         start_time = time.time()
-        with torch.no_grad():
-            predictions_logits = model(X_test_tensor)
-            predictions_prob = torch.softmax(predictions_logits, dim=1)
+        predictions_prob = model.predict(X_test, verbose=0)
         end_time = time.time()
         
         inference_time = (end_time - start_time) * 1000  # Convert to milliseconds
         inference_time_per_sample = inference_time / len(X_test)
         
-        # Convert to numpy
-        predictions_prob = predictions_prob.cpu().numpy()
+        # Get class predictions
         predictions_class = np.argmax(predictions_prob, axis=1)
         
         logger.info(f"Inference time: {inference_time_per_sample:.3f} ms per sample")
@@ -412,11 +375,8 @@ class IoTEvaluator:
         """
         logger.info(f"Evaluating {model_name}")
         
-        # Determine model type from name
-        model_type = "lstm_cnn" if "lstm_cnn" in model_name.lower() else "cnn_lstm"
-        
         # Load model
-        model = self.load_model(model_path, model_type)
+        model = self.load_model(model_path)
         
         # Make predictions
         y_pred_prob, y_pred_class, inference_time = self.make_predictions(model, X_test)
@@ -465,17 +425,11 @@ class IoTEvaluator:
         X_test, y_test = self.load_test_data(data_path)
         
         # Evaluate LSTM-CNN model
-        lstm_cnn_path = os.path.join(self.paths_config['models'], 'lstm_cnn_best.pth')
-        # Fallback to .h5 if .pth doesn't exist
-        if not os.path.exists(lstm_cnn_path):
-            lstm_cnn_path = os.path.join(self.paths_config['models'], 'lstm_cnn_best.h5')
+        lstm_cnn_path = os.path.join(self.paths_config['models'], 'lstm_cnn_best.h5')
         lstm_cnn_metrics = self.evaluate_model(lstm_cnn_path, "LSTM-CNN", X_test, y_test)
         
         # Evaluate CNN-LSTM model
-        cnn_lstm_path = os.path.join(self.paths_config['models'], 'cnn_lstm_best.pth')
-        # Fallback to .h5 if .pth doesn't exist
-        if not os.path.exists(cnn_lstm_path):
-            cnn_lstm_path = os.path.join(self.paths_config['models'], 'cnn_lstm_best.h5')
+        cnn_lstm_path = os.path.join(self.paths_config['models'], 'cnn_lstm_best.h5')
         cnn_lstm_metrics = self.evaluate_model(cnn_lstm_path, "CNN-LSTM", X_test, y_test)
         
         logger.info("Evaluation of both models completed")
