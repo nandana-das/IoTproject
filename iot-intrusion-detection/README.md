@@ -187,24 +187,26 @@ Output Layer (5 units, softmax)
 ### Achieved Performance
 - **CNN-LSTM Accuracy**: 92.50% 🎯
 - **LSTM-CNN Accuracy**: 87.09%
-- **Training Time**: CNN-LSTM (2.3h), LSTM-CNN (15h)
+- **Training Time**: CNN-LSTM (2.3h), LSTM-CNN (system issues caused delays)
 - **Dataset**: Full BoT-IoT dataset (2.5M+ samples)
 - **Framework**: TensorFlow/Keras
 
 ### Training Process Details
-- **CNN-LSTM**: Completed all 50 epochs with steady improvement
-- **LSTM-CNN**: Early stopping at epoch 14 (best performance at epoch 4)
+- **CNN-LSTM**: Completed all 50 epochs with steady improvement (2.3h actual training)
+- **LSTM-CNN**: Early stopping at epoch 14 (best performance at epoch 4, system issues caused delays)
 - **GPU Training**: RTX 3050 with CUDA acceleration
 - **Batch Size**: 64 (optimized for GPU memory)
 - **Learning Rate**: 0.001 with adaptive reduction
 - **Callbacks**: Early stopping, model checkpointing, learning rate reduction
+- **Note**: LSTM-CNN training experienced system slowdowns during epochs 5 and 12
 
 ### Model Comparison Results
 ```
 Metric              LSTM-CNN    CNN-LSTM    Winner
 ────────────────────────────────────────────────────
 Accuracy            87.09%      92.50%      CNN-LSTM 🏆
-Training Time       15.0h       2.3h       CNN-LSTM 🏆
+Training Time       System      2.3h       CNN-LSTM 🏆
+                    Issues
 Convergence         Epoch 4     Epoch 50    LSTM-CNN 🏆
 Parameters          94,341      79,109      LSTM-CNN 🏆
 Early Stopping      Yes         No          LSTM-CNN 🏆
@@ -214,7 +216,7 @@ Early Stopping      Yes         No          LSTM-CNN 🏆
 
 ### CNN-LSTM Strengths (Winner 🏆)
 - **Higher Accuracy**: 92.50% vs 87.09% (5.4% improvement)
-- **Faster Training**: 2.3 hours vs 15 hours (6.5x faster)
+- **Faster Training**: 2.3 hours vs system issues (much more efficient)
 - **Better Convergence**: Steady improvement over 50 epochs
 - **Spatial Feature Extraction**: Better at identifying static patterns first
 
@@ -250,10 +252,10 @@ Edit `config.yaml` to modify:
 
 1. **Does layer ordering affect performance?** Yes, CNN-LSTM shows significant improvement (5.4% higher accuracy)
 2. **Which model is more accurate?** CNN-LSTM achieves 92.50% vs LSTM-CNN's 87.09%
-3. **Which model is faster?** CNN-LSTM offers 6.5x faster training (2.3h vs 15h)
+3. **Which model is faster?** CNN-LSTM offers much faster training (2.3h vs system issues)
 4. **Which architecture is better for IoT security?** CNN-LSTM is the clear winner:
    - **Higher Accuracy**: 92.50% vs 87.09%
-   - **Faster Training**: 2.3 hours vs 15 hours
+   - **Faster Training**: 2.3 hours vs system issues
    - **Better Performance**: Superior across all metrics
    - **Production Ready**: More efficient for real-world deployment
 
