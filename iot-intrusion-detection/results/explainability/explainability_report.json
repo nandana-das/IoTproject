@@ -1,0 +1,58 @@
+{
+  "analysis_summary": {
+    "models_analyzed": [
+      "CNN-LSTM",
+      "LSTM-CNN"
+    ],
+    "total_samples": 1000,
+    "analysis_date": "2025-10-18T12:04:05.320337"
+  },
+  "key_findings": {
+    "CNN-LSTM": {
+      "top_features": [
+        [
+          "stddev",
+          0.31200000000000006
+        ],
+        [
+          "min",
+          0.29600000000000004
+        ],
+        [
+          "N_IN_Conn_P_DstIP",
+          0.274
+        ]
+      ],
+      "most_important_feature": [
+        "stddev",
+        0.31200000000000006
+      ]
+    },
+    "LSTM-CNN": {
+      "top_features": [
+        [
+          "N_IN_Conn_P_DstIP",
+          0.25
+        ],
+        [
+          "N_IN_Conn_P_SrcIP",
+          0.132
+        ],
+        [
+          "state_number",
+          0.09799999999999998
+        ]
+      ],
+      "most_important_feature": [
+        "N_IN_Conn_P_DstIP",
+        0.25
+      ]
+    }
+  },
+  "recommendations": [
+    "Focus monitoring on these critical features: N_IN_Conn_P_SrcIP, stddev, mean, N_IN_Conn_P_DstIP, max",
+    "Implement real-time feature extraction for top-ranked features",
+    "Consider feature engineering to enhance discriminative power",
+    "Deploy ensemble methods combining both model architectures"
+  ]
+}

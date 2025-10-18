@@ -187,26 +187,26 @@ Output Layer (5 units, softmax)
 ### Achieved Performance
 - **CNN-LSTM Accuracy**: 92.50% 🎯
 - **LSTM-CNN Accuracy**: 87.09%
-- **Training Time**: CNN-LSTM (2.3h), LSTM-CNN (system issues caused delays)
+- **Training Time**: CNN-LSTM (2.3h), LSTM-CNN (~1h actual, internet issues caused delays)
 - **Dataset**: Full BoT-IoT dataset (2.5M+ samples)
 - **Framework**: TensorFlow/Keras
 
 ### Training Process Details
 - **CNN-LSTM**: Completed all 50 epochs with steady improvement (2.3h actual training)
-- **LSTM-CNN**: Early stopping at epoch 14 (best performance at epoch 4, system issues caused delays)
+- **LSTM-CNN**: Early stopping at epoch 14 (best performance at epoch 4, ~1h actual training)
 - **GPU Training**: RTX 3050 with CUDA acceleration
 - **Batch Size**: 64 (optimized for GPU memory)
 - **Learning Rate**: 0.001 with adaptive reduction
 - **Callbacks**: Early stopping, model checkpointing, learning rate reduction
-- **Note**: LSTM-CNN training experienced system slowdowns during epochs 5 and 12
+- **Note**: LSTM-CNN training experienced internet connectivity issues during epochs 5 and 12
 
 ### Model Comparison Results
 ```
 Metric              LSTM-CNN    CNN-LSTM    Winner
 ────────────────────────────────────────────────────
 Accuracy            87.09%      92.50%      CNN-LSTM 🏆
-Training Time       System      2.3h       CNN-LSTM 🏆
-                    Issues
+Training Time       ~1h         2.3h       LSTM-CNN 🏆
+                    (actual)
 Convergence         Epoch 4     Epoch 50    LSTM-CNN 🏆
 Parameters          94,341      79,109      LSTM-CNN 🏆
 Early Stopping      Yes         No          LSTM-CNN 🏆
